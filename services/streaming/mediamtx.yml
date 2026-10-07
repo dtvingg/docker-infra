@@ -1,0 +1,18 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.15.3
+    container_name: mediamtx
+    restart: unless-stopped
+    ports:
+      - "${MEDIAMTX_RTSP_PORT:-8554}:8554"
+      - "${MEDIAMTX_HLS_PORT:-8888}:8888"
+      - "${MEDIAMTX_API_PORT:-9997}:9997"
+    environment:
+      MTX_API: "yes"
+      MTX_AUTHINTERNALUSERS_1_IPS: 0.0.0.0/0
+    shm_size: 512mb
+
+networks:
+  default:
+    name: docker-infra-network
+    external: true

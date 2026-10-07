@@ -1,0 +1,32 @@
+services:
+  emqx:
+    image: emqx/emqx:5.8
+    container_name: emqx
+    hostname: emqx
+    restart: unless-stopped
+    ports:
+      - "${EMQX_MQTT_PORT:-1884}:1883"
+      - "${EMQX_MQTTS_PORT:-8883}:8883"
+      - "${EMQX_WS_PORT:-8083}:8083"
+      - "${EMQX_DASHBOARD_PORT:-18083}:18083"
+    environment:
+      EMQX_NODE__NAME: emqx@emqx
+      EMQX_NODE__COOKIE: ${EMQX_NODE_COOKIE:-emqx_secret_cookie}
+      EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USER:-admin}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-public}
+    volumes:
+      - emqx_data:/opt/emqx/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:18083/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  emqx_data:
+
+networks:
+  default:
+    name: docker-infra-network
+    external: true

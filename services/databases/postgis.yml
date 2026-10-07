@@ -1,0 +1,26 @@
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: postgis
+    restart: unless-stopped
+    ports:
+      - "${POSTGIS_PORT:-5434}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGIS_DB:-gisdb}
+      POSTGRES_USER: ${POSTGIS_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGIS_PASSWORD:-postgres}
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGIS_USER:-postgres} -d ${POSTGIS_DB:-gisdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgis_data:
+
+networks:
+  default:
+    name: docker-infra-network
+    external: true

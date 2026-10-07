@@ -7,12 +7,16 @@ init:
 down:
 	docker compose -f services/databases/postgres.yml down
 	docker compose -f services/databases/pgvector.yml down
+	docker compose -f services/databases/postgis.yml down
 	docker compose -f services/databases/mongodb.yml down
 	docker compose -f services/databases/redis.yml down
 	docker compose -f services/databases/oracle.yml down
 	docker compose -f services/storage/minio.yml down
 	docker compose -f services/storage/qdrant.yml down
 	docker compose -f services/queue/rabbitmq.yml down
+	docker compose -f services/queue/emqx.yml down
+	docker compose -f services/streaming/mosquitto.yml down
+	docker compose -f services/streaming/mediamtx.yml down
 
 ps:
 	docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"

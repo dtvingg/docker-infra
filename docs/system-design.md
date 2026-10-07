@@ -2,7 +2,7 @@
 
 ## 1. Mục tiêu
 
-Bộ infrastructure Docker Compose tối giản, tập trung vào **databases**, **storage**, **queue**. Mỗi service chạy độc lập bằng lệnh `docker compose` trực tiếp, không phụ thuộc vào Makefile để start service.
+Bộ infrastructure Docker Compose tối giản, tập trung vào **databases**, **storage**, **queue**, **streaming**. Mỗi service chạy độc lập bằng lệnh `docker compose` trực tiếp, không phụ thuộc vào Makefile để start service.
 
 ---
 
@@ -20,6 +20,7 @@ docker-infra/
     ├── databases/
     │   ├── postgres.yml
     │   ├── pgvector.yml
+    │   ├── postgis.yml
     │   ├── mongodb.yml
     │   ├── redis.yml
     │   └── oracle.yml
@@ -28,8 +29,13 @@ docker-infra/
     │   ├── minio.yml
     │   └── qdrant.yml
     │
-    └── queue/
-        └── rabbitmq.yml
+    ├── queue/
+    │   ├── rabbitmq.yml
+    │   └── emqx.yml
+    │
+    └── streaming/
+        ├── mosquitto.yml
+        └── mediamtx.yml
 ```
 
 ---
@@ -95,6 +101,14 @@ PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=postgres
 
 # ================================
+# PostGIS
+# ================================
+POSTGIS_PORT=5434
+POSTGIS_DB=gisdb
+POSTGIS_USER=postgres
+POSTGIS_PASSWORD=postgres
+
+# ================================
 # MongoDB
 # ================================
 MONGO_PORT=27017
@@ -137,6 +151,29 @@ RABBITMQ_MANAGEMENT_PORT=15672
 RABBITMQ_DEFAULT_USER=guest
 RABBITMQ_DEFAULT_PASS=guest
 RABBITMQ_DEFAULT_VHOST=/
+
+# ================================
+# EMQX
+# ================================
+EMQX_MQTT_PORT=1884
+EMQX_MQTTS_PORT=8883
+EMQX_WS_PORT=8083
+EMQX_DASHBOARD_PORT=18083
+EMQX_DASHBOARD_USER=admin
+EMQX_DASHBOARD_PASSWORD=public
+EMQX_NODE_COOKIE=emqx_secret_cookie
+
+# ================================
+# Mosquitto
+# ================================
+MOSQUITTO_PORT=1883
+
+# ================================
+# MediaMTX
+# ================================
+MEDIAMTX_RTSP_PORT=8554
+MEDIAMTX_HLS_PORT=8888
+MEDIAMTX_API_PORT=9997
 ```
 
 ---
@@ -151,12 +188,16 @@ Pattern: `<service>` (không prefix, tên ngắn gọn)
 |------------|----------------|
 | PostgreSQL | `postgres`     |
 | pgvector   | `pgvector`     |
+| PostGIS    | `postgis`      |
 | MongoDB    | `mongodb`      |
 | Redis      | `redis`        |
 | Oracle     | `oracle`       |
 | MinIO      | `minio`        |
 | Qdrant     | `qdrant`       |
 | RabbitMQ   | `rabbitmq`     |
+| EMQX       | `emqx`         |
+| Mosquitto  | `mosquitto`    |
+| MediaMTX   | `mediamtx`     |
 
 ### Volume name
 
@@ -166,12 +207,16 @@ Pattern: `<service>_data`
 |------------|------------------|
 | PostgreSQL | `postgres_data`  |
 | pgvector   | `pgvector_data`  |
+| PostGIS    | `postgis_data`   |
 | MongoDB    | `mongodb_data`   |
 | Redis      | `redis_data`     |
 | Oracle     | `oracle_data`    |
 | MinIO      | `minio_data`     |
 | Qdrant     | `qdrant_data`    |
 | RabbitMQ   | `rabbitmq_data`  |
+| EMQX       | `emqx_data`      |
+| Mosquitto  | `mosquitto_data` |
+| MediaMTX   | _(không có)_     |
 
 ---
 
@@ -296,6 +341,73 @@ Pattern: `<service>_data`
 
 ---
 
+### 6.9 PostGIS (`services/databases/postgis.yml`)
+
+- **Image**: `postgis/postgis:16-3.4`
+- **Container**: `postgis`
+- **Port**: `${POSTGIS_PORT:-5434}:5432` ← port 5434 để tránh conflict với postgres (5432) và pgvector (5433)
+- **Volume**: `postgis_data:/var/lib/postgresql/data`
+- **Restart**: `unless-stopped`
+- **Env**:
+  - `POSTGRES_DB=${POSTGIS_DB:-gisdb}`
+  - `POSTGRES_USER=${POSTGIS_USER:-postgres}`
+  - `POSTGRES_PASSWORD=${POSTGIS_PASSWORD:-postgres}`
+- **Health check**: `pg_isready -U postgres -d gisdb`
+
+---
+
+### 6.10 EMQX (`services/queue/emqx.yml`)
+
+- **Image**: `emqx/emqx:5.8`
+- **Container**: `emqx` (hostname `emqx`, node name `emqx@emqx` — cố định để giữ data khi restart)
+- **Port**:
+  - `${EMQX_MQTT_PORT:-1884}:1883` (MQTT) ← port 1884 ở host để tránh conflict với Mosquitto
+  - `${EMQX_MQTTS_PORT:-8883}:8883` (MQTT over TLS)
+  - `${EMQX_WS_PORT:-8083}:8083` (MQTT over WebSocket)
+  - `${EMQX_DASHBOARD_PORT:-18083}:18083` (Dashboard / REST API)
+- **Volume**: `emqx_data:/opt/emqx/data`
+- **Restart**: `unless-stopped`
+- **Env**:
+  - `EMQX_NODE__NAME=emqx@emqx`
+  - `EMQX_NODE__COOKIE=${EMQX_NODE_COOKIE:-emqx_secret_cookie}`
+  - `EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}`
+  - `EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}`
+- **Health check**: `curl -fsS http://localhost:18083/status`
+- **Lưu ý**: Trên một số máy Windows, port 8883 nằm trong dải WinNAT reserved → đổi `EMQX_MQTTS_PORT` (vd `18883`) nếu bị lỗi bind
+
+---
+
+### 6.11 Mosquitto (`services/streaming/mosquitto.yml`)
+
+- **Image**: `eclipse-mosquitto:2.0.15`
+- **Container**: `mosquitto`
+- **Port**: `${MOSQUITTO_PORT:-1883}:1883` (MQTT)
+- **Volume**: `mosquitto_data:/mosquitto/data`
+- **Restart**: `unless-stopped`
+- **Command**: `mosquitto -c /mosquitto-no-auth.conf` — config có sẵn trong image, cho phép anonymous, không cần file config riêng
+- **Health check**: `mosquitto_sub -t '$SYS/broker/uptime' -C 1 -W 3`
+- **Lưu ý**: Chỉ dùng cho local. Muốn bật auth / WebSocket thì cần mount file config riêng
+
+---
+
+### 6.12 MediaMTX (`services/streaming/mediamtx.yml`)
+
+- **Image**: `bluenviron/mediamtx:1.15.3`
+- **Container**: `mediamtx`
+- **Port**:
+  - `${MEDIAMTX_RTSP_PORT:-8554}:8554` (RTSP)
+  - `${MEDIAMTX_HLS_PORT:-8888}:8888` (HLS)
+  - `${MEDIAMTX_API_PORT:-9997}:9997` (API)
+- **Volume**: không có — dùng config mặc định của image, không lưu data
+- **Restart**: `unless-stopped`
+- **Env** (override config mặc định qua biến `MTX_*`):
+  - `MTX_API=yes` — bật API
+  - `MTX_AUTHINTERNALUSERS_1_IPS=0.0.0.0/0` — cho phép gọi API từ host (mặc định chỉ cho localhost trong container)
+- **Health check**: không có — image build từ `scratch`, không có shell/curl
+- **Lưu ý**: Mọi path đều publish/read được không cần auth — chỉ dùng cho local
+
+---
+
 ## 7. Makefile
 
 ```makefile
@@ -308,12 +420,16 @@ init:
 down:
 	docker compose -f services/databases/postgres.yml down
 	docker compose -f services/databases/pgvector.yml down
+	docker compose -f services/databases/postgis.yml down
 	docker compose -f services/databases/mongodb.yml down
 	docker compose -f services/databases/redis.yml down
 	docker compose -f services/databases/oracle.yml down
 	docker compose -f services/storage/minio.yml down
 	docker compose -f services/storage/qdrant.yml down
 	docker compose -f services/queue/rabbitmq.yml down
+	docker compose -f services/queue/emqx.yml down
+	docker compose -f services/streaming/mosquitto.yml down
+	docker compose -f services/streaming/mediamtx.yml down
 
 ps:
 	docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
@@ -342,12 +458,16 @@ nano .env
 ```bash
 docker compose -f services/databases/postgres.yml --env-file .env up -d
 docker compose -f services/databases/pgvector.yml --env-file .env up -d
+docker compose -f services/databases/postgis.yml --env-file .env up -d
 docker compose -f services/databases/mongodb.yml --env-file .env up -d
 docker compose -f services/databases/redis.yml --env-file .env up -d
 docker compose -f services/databases/oracle.yml --env-file .env up -d
 docker compose -f services/storage/minio.yml --env-file .env up -d
 docker compose -f services/storage/qdrant.yml --env-file .env up -d
 docker compose -f services/queue/rabbitmq.yml --env-file .env up -d
+docker compose -f services/queue/emqx.yml --env-file .env up -d
+docker compose -f services/streaming/mosquitto.yml --env-file .env up -d
+docker compose -f services/streaming/mediamtx.yml --env-file .env up -d
 ```
 
 ### Dừng service
@@ -374,6 +494,7 @@ make ps
 |------------|-----------|----------------|--------------------|
 | PostgreSQL | 5432      | 5432           | TCP                |
 | pgvector   | 5433      | 5432           | TCP                |
+| PostGIS    | 5434      | 5432           | TCP                |
 | MongoDB    | 27017     | 27017          | TCP                |
 | Redis      | 6379      | 6379           | TCP                |
 | Oracle     | 1521      | 1521           | TCP                |
@@ -383,6 +504,14 @@ make ps
 | Qdrant     | 6334      | 6334           | gRPC               |
 | RabbitMQ   | 5672      | 5672           | AMQP               |
 | RabbitMQ   | 15672     | 15672          | HTTP (Management)  |
+| EMQX       | 1884      | 1883           | MQTT               |
+| EMQX       | 8883      | 8883           | MQTT over TLS      |
+| EMQX       | 8083      | 8083           | MQTT over WS       |
+| EMQX       | 18083     | 18083          | HTTP (Dashboard)   |
+| Mosquitto  | 1883      | 1883           | MQTT               |
+| MediaMTX   | 8554      | 8554           | RTSP               |
+| MediaMTX   | 8888      | 8888           | HTTP (HLS)         |
+| MediaMTX   | 9997      | 9997           | HTTP (API)         |
 
 ---
 
@@ -390,6 +519,8 @@ make ps
 
 - **Không hardcode** password trong compose file, luôn dùng biến `${VAR:-default}`
 - **pgvector dùng port 5433** ở host để tránh conflict với postgres trên 5432
+- **PostGIS dùng port 5434** ở host để tránh conflict với postgres và pgvector
+- **EMQX dùng port MQTT 1884** ở host để tránh conflict với Mosquitto trên 1883
 - **Oracle** cần ít nhất 2GB RAM, `start_period: 120s` trong health check
 - **Tất cả volumes** là named volume, không dùng bind mount
 - **Restart policy** `unless-stopped` — tự restart khi Docker daemon khởi động lại, trừ khi stop thủ công
